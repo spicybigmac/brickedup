@@ -17,7 +17,7 @@ python main.py
 
 Open <http://localhost:8000>. The application itself has no account system or database.
 
-By default, the backend calls the public `Upsampler/stable-fast-3d` Hugging Face Space and then tries the official Space if the primary provider fails. Public ZeroGPU Spaces have per-account/IP usage limits, and the official Space's stateful web workflow is not always callable through its public API. If both remote calls fail, the app continues with a clearly labeled, upright image-relief model generated locally from the uploaded image. Set `SF3D_LOCAL_FALLBACK=0` if you prefer remote failures to stop the job. `HF_TOKEN` is optional for public Spaces. Add `GEMINI_API_KEY` to let Gemini name the generated build. The diagram layout and geometrically accurate layer steps are generated locally.
+By default, the backend calls the public `Upsampler/stable-fast-3d` Hugging Face Space and then tries the official Space if the primary provider fails. Public ZeroGPU Spaces have per-account/IP usage limits, and the official Space's stateful web workflow is not always callable through its public API. If all providers fail, the job shows the remote inference error. `HF_TOKEN` is optional for public Spaces. Add `GEMINI_API_KEY` to let Gemini name the generated build. The diagram layout and geometrically accurate layer steps are generated locally.
 
 For offline development, set `SF3D_DEMO_MODE=1`. The UI labels the resulting procedural geometry as a demo.
 
@@ -33,7 +33,7 @@ Upload one PNG, JPG/JPEG, or WebP image no larger than 10 MB.
 ## What each part does
 
 - `main.py` serves the SPA, validates real image content with Pillow, exposes the API, and runs longer work in a thread pool.
-- `app/stable_fast_3d.py` calls a Stable Fast 3D Hugging Face Space, tries a second provider when necessary, and downloads the generated GLB. If free GPU inference is unavailable, it creates a two-stud-deep local relief from the uploaded object's silhouette and sampled colors. Stable Fast 3D meshes are converted from Y-up into the app's Z-up build grid and filled into a roughly 22-stud voxel model. Colors are transferred from the GLB PBR base-color texture or vertex colors; the uploaded image is used as the fallback color projection. The result is adaptively quantized to 32 colors.
+- `app/stable_fast_3d.py` calls a Stable Fast 3D Hugging Face Space, tries a second provider when necessary, and downloads the generated GLB. Stable Fast 3D meshes are converted from Y-up into the app's Z-up build grid and filled into a target 32-stud voxel model capped at 35,000 cells. Colors use the closest surface triangle and barycentrically interpolated UV coordinates to sample the GLB texture accurately; vertex colors and front-projected source-image colors remain fallbacks. The result is adaptively quantized to 32 colors.
 - `app/lego.py` scans each height/color layer and greedily places the largest common rectangular brick that fits. Odd layers reverse the preferred orientation to reduce aligned seams.
 - `app/manual.py` optionally asks Gemini for a short build title, then uses ReportLab to create a diagram-first manual: color part icons, exact top-down stud grids, ghosted already-built support, consistent front markers, height meters, and placement arrows with very little text. Dense layers are split into smaller steps so every required part remains visible in the callouts.
 - `app/store.py` holds job state in memory for this one-instance hackathon deployment.
@@ -60,6 +60,8 @@ Upload one PNG, JPG/JPEG, or WebP image no larger than 10 MB.
 - `SF3D_REMESH` defaults to `None`; valid Space choices are `None`, `Triangle`, and `Quad`.
 - `SF3D_VERTEX_COUNT` defaults to `-1`, which preserves the generated topology.
 - `SF3D_TEXTURE_SIZE` defaults to `1024`.
+- `VOXEL_TARGET_STUDS` defaults to `32`; dense meshes automatically step down only as far as needed to respect the cell cap.
+- `VOXEL_MAX_CELLS` defaults to `35000`. The converter lowers the whole resolution instead of deleting every nth cell, so capped models remain contiguous.
 - `SF3D_DEMO_MODE=1` disables the Space call and generates local demo geometry.
 
 ## MVP trade-offs
@@ -70,7 +72,9 @@ For production, persist jobs in a database and object storage, move generation i
 
 ## Render deployment
 
-Create a Blueprint in Render from this repository. `render.yaml` supplies the build and start commands. Add `HF_TOKEN` and `GEMINI_API_KEY` as secret environment variables if desired. Render storage is ephemeral, so generated jobs disappear when the service restarts.
+Create a **Blueprint** or **Web Service**, not a Static Site, from this repository. `render.yaml` installs the Python dependencies, starts Uvicorn on Render's assigned `$PORT`, and checks `/api/health`. Add `HF_TOKEN` and `GEMINI_API_KEY` as secret environment variables, then deploy and open the web service's single `onrender.com` URL. FastAPI serves both `static/` and `/api`, so the browser's relative API requests stay on the same origin and need no CORS configuration.
+
+If a Static Site was created already, it can display the HTML but has no Python process behind `/api`. Create a new Web Service/Blueprint and use its URL instead. Confirm `https://YOUR-SERVICE.onrender.com/api/health` returns JSON before testing an upload. Free services spin down when idle and use an ephemeral filesystem, so generated jobs and downloads disappear on restart; upgrade the web service or add managed persistence before a live judging session if reliability matters.
 
 ## Tests
 

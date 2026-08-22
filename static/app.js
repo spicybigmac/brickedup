@@ -260,16 +260,11 @@ function populateVoxel(job) {
     : `${dimensions.width ?? dimensions.x ?? 0} × ${dimensions.depth ?? dimensions.y ?? 0} × ${dimensions.height ?? dimensions.z ?? 0}`;
   document.querySelector("#voxel-count").textContent = Number(voxels.length).toLocaleString();
   const isDemo = job.mode === "demo";
-  const isLocalFallback = job.mode === "local-fallback";
   const modeTag = document.querySelector("#demo-tag");
   const modeNotice = document.querySelector("#demo-notice");
-  modeTag.hidden = !isDemo && !isLocalFallback;
-  modeNotice.hidden = !isDemo && !isLocalFallback;
-  if (isLocalFallback) {
-    modeTag.textContent = "LOCAL FALLBACK";
-    modeNotice.querySelector("strong").textContent = "Local fallback";
-    modeNotice.querySelector("span").textContent = "The free Hugging Face GPU was unavailable, so Bricked Up created an upright image-derived relief instead.";
-  } else if (isDemo) {
+  modeTag.hidden = !isDemo;
+  modeNotice.hidden = !isDemo;
+  if (isDemo) {
     modeTag.textContent = "DEMO MODEL";
     modeNotice.querySelector("strong").textContent = "Demo geometry";
     modeNotice.querySelector("span").innerHTML = "Disable <code>SF3D_DEMO_MODE</code> to generate with Stable Fast 3D through the public Hugging Face Space.";
@@ -576,9 +571,11 @@ function addVoxels(group, voxels) {
 }
 
 function createVoxelMaterial() {
-  // Unlit rendering displays each backend hex colour exactly; voxel separation
-  // comes from geometry spacing rather than a colour-altering edge shader.
-  return new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  // InstancedMesh supplies each voxel's tint through instanceColor. Keep the
+  // material's base multiplier white and do not request a missing per-vertex
+  // geometry colour attribute, which can multiply valid instance colours down
+  // to black on some Three.js/WebGL code paths.
+  return new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
 }
 
 function addBricks(group, bricks) {

@@ -4,16 +4,23 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 300
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.0
+        value: 3.12.12
       - key: HF_TOKEN
         sync: false
       - key: HF_SPACE_ID
         value: Upsampler/stable-fast-3d
       - key: HF_SPACE_API_NAME
         value: /image_to_glb
+      - key: VOXEL_TARGET_STUDS
+        value: 32
+      - key: VOXEL_MAX_CELLS
+        value: 35000
+      - key: WORKER_THREADS
+        value: 2
       - key: GEMINI_API_KEY
         sync: false

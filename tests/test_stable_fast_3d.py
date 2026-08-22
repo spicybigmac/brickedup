@@ -60,6 +60,38 @@ def test_voxelize_reads_gltf_pbr_base_color_texture(tmp_path: Path):
     assert {voxel["color"] for voxel in voxels} == {"#12C878"}
 
 
+def test_surface_colors_interpolate_uvs_across_nearest_triangle():
+    mesh = trimesh.Trimesh(
+        vertices=np.array([[0, 0, 0], [2, 0, 0], [0, 2, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]]),
+        process=False,
+    )
+    texture = Image.new("RGB", (3, 2))
+    for y in range(2):
+        texture.putpixel((0, y), (255, 0, 0))
+        texture.putpixel((1, y), (0, 255, 0))
+        texture.putpixel((2, y), (0, 0, 255))
+    mesh.visual = trimesh.visual.TextureVisuals(
+        uv=np.array([[0, 0], [1, 0], [0, 1]], dtype=float),
+        material=trimesh.visual.material.PBRMaterial(baseColorTexture=texture),
+    )
+
+    colors = stable_fast_3d._surface_colors(mesh, np.array([[1, 1, 0]], dtype=float), None)
+
+    assert colors.tolist() == [[0, 255, 0]]
+
+
+def test_voxel_cap_reduces_resolution_without_punching_holes(tmp_path: Path):
+    model = tmp_path / "dense-box.glb"
+    trimesh.creation.box(extents=(2, 2, 2)).export(model)
+
+    voxels = stable_fast_3d.voxelize(model, target_studs=32, max_voxels=35_000)
+    dimensions = [max(voxel[axis] for voxel in voxels) + 1 for axis in ("x", "y", "z")]
+
+    assert len(voxels) <= 35_000
+    assert len(voxels) == int(np.prod(dimensions))
+
+
 def test_generation_fails_over_to_healthy_space(monkeypatch, tmp_path: Path):
     image = tmp_path / "object.png"
     image.write_bytes(b"image")
@@ -111,38 +143,25 @@ def test_generation_reports_all_provider_failure(monkeypatch, tmp_path: Path):
     assert "provider internals" not in str(error.value)
 
 
-def test_local_relief_is_upright_and_preserves_image_colors(tmp_path: Path):
-    image = Image.new("RGB", (12, 20), "white")
-    for x in range(3, 9):
-        for y in range(2, 18):
-            image.putpixel((x, y), (255, 0, 0) if x < 6 else (0, 0, 255))
-    image_path = tmp_path / "object.png"
-    image.save(image_path)
+def test_generation_exposes_quota_numbers_but_strips_html(monkeypatch, tmp_path: Path):
+    class QuotaClient:
+        def __init__(self, space_id, **_kwargs):
+            self.space_id = space_id
 
-    voxels = stable_fast_3d._image_relief_voxels(image_path, target_studs=20)
+        def predict(self, **_kwargs):
+            raise RuntimeError(
+                "You have exceeded your ZeroGPU quota (30s requested vs. 12s left). "
+                '<a href="https://example.com">Try again later</a>'
+            )
 
-    width = max(voxel["x"] for voxel in voxels) + 1
-    depth = max(voxel["y"] for voxel in voxels) + 1
-    height = max(voxel["z"] for voxel in voxels) + 1
-    assert height > width > depth
-    assert {voxel["color"] for voxel in voxels} == {"#FF0000", "#0000FF"}
+    image = tmp_path / "object.png"
+    image.write_bytes(b"image")
+    monkeypatch.setenv("HF_SPACE_ID", "Upsampler/stable-fast-3d")
+    monkeypatch.delenv("HF_SPACE_API_NAME", raising=False)
+    monkeypatch.setattr(stable_fast_3d, "Client", QuotaClient)
+    monkeypatch.setattr(stable_fast_3d, "handle_file", lambda path: path)
 
-
-def test_reconstruct_falls_back_locally_when_spaces_fail(monkeypatch, tmp_path: Path):
-    image_path = tmp_path / "object.png"
-    Image.new("RGB", (10, 18), "#C84832").save(image_path)
-    monkeypatch.setattr(
-        stable_fast_3d,
-        "_generate_glb",
-        lambda *_args: (_ for _ in ()).throw(RuntimeError("quota exhausted")),
-    )
-    messages = []
-
-    voxels, mode, model_path = stable_fast_3d.reconstruct(
-        image_path, tmp_path, lambda progress, message: messages.append((progress, message))
-    )
-
-    assert voxels
-    assert mode == "local-fallback"
-    assert model_path.exists()
-    assert any("Free GPU unavailable" in message for _, message in messages)
+    with pytest.raises(RuntimeError) as error:
+        stable_fast_3d._generate_glb(image, None)
+    assert "30s requested vs. 12s left" in str(error.value)
+    assert "<a" not in str(error.value)
