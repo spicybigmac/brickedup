@@ -1,0 +1,1 @@
+"""Bricked Up backend package."""

@@ -1,0 +1,12 @@
+fastapi==0.116.1
+pydantic==2.11.7
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+python-dotenv==1.1.1
+httpx==0.28.1
+gradio-client==1.14.0
+numpy==2.3.2
+scipy==1.16.1
+trimesh==4.7.1
+reportlab==4.4.3
+pillow==12.3.0

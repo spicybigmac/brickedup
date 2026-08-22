@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f3efe6" />
+    <meta name="description" content="Turn one clear object image into a voxel sculpture, a brick build, and downloadable instructions." />
+    <title>Bricked Up — Image to build</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#app-main">Skip to content</a>
+    <header class="site-header">
+      <button class="wordmark" id="home-button" type="button" aria-label="Bricked Up home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span>Bricked Up</span>
+      </button>
+    </header>
+
+    <nav class="build-rail" aria-label="Build progress">
+      <ol id="progress-rail">
+        <li data-step="capture"><span class="rail-stud">01</span><span>Image</span></li>
+        <li data-step="reconstruct"><span class="rail-stud">02</span><span>Generate</span></li>
+        <li data-step="voxel"><span class="rail-stud">03</span><span>Voxel</span></li>
+        <li data-step="bricks"><span class="rail-stud">04</span><span>Bricks</span></li>
+        <li data-step="manual"><span class="rail-stud">05</span><span>Manual</span></li>
+      </ol>
+    </nav>
+
+    <main id="app-main" tabindex="-1">
+      <section class="view landing-view is-active" data-view="landing" aria-labelledby="landing-title">
+        <div class="hero-copy">
+          <h1 id="landing-title" class="reveal" tabindex="-1">Snap it.<br /><span>Build it.</span></h1>
+          <p class="hero-lede reveal delay-1">Turn one clear object image into a voxel model, a brick-ready set, and a printable instruction manual.</p>
+          <button class="primary-button reveal delay-2" id="start-button" type="button">
+            <span>Let’s go!</span><span aria-hidden="true">↗</span>
+          </button>
+        </div>
+        <div class="hero-object" aria-hidden="true">
+          <div class="object-caption"><span>OBJECT STUDY</span><b>01</b></div>
+          <div class="brick-sculpture">
+            <span class="brick b1"></span><span class="brick b2"></span><span class="brick b3"></span>
+            <span class="brick b4"></span><span class="brick b5"></span><span class="brick b6"></span>
+            <span class="brick b7"></span><span class="brick b8"></span><span class="brick b9"></span>
+          </div>
+        </div>
+        <div class="landing-index" aria-hidden="true">01—05</div>
+      </section>
+
+      <section class="view upload-view" data-view="upload" aria-labelledby="upload-title">
+        <div class="section-heading">
+          <p class="eyebrow">01 / Image</p>
+          <h2 id="upload-title" tabindex="-1">Choose one clear view.</h2>
+          <p>Upload a single image of one object. We’ll prepare it at 512 × 512 and remove the background automatically.</p>
+        </div>
+        <form id="upload-form" class="upload-layout">
+          <label class="drop-zone" id="drop-zone" for="image-input">
+            <input id="image-input" name="image" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" />
+            <span class="drop-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <strong id="drop-title">Drop your object image here</strong>
+            <span id="drop-detail">or choose a file · PNG, JPG, or WebP</span>
+            <span class="file-readout" id="file-readout" hidden></span>
+          </label>
+          <aside class="capture-notes" aria-label="Image tips">
+            <p class="mono-label">A BETTER INPUT</p>
+            <ol>
+              <li><span>01</span><p>Use one object, fully visible in frame.</p></li>
+              <li><span>02</span><p>Prefer a plain or transparent background with clear separation from the object.</p></li>
+              <li><span>03</span><p>Use even light and avoid blur; a square image works best.</p></li>
+            </ol>
+            <div class="limit-meter"><span>MAX FILE</span><strong>10 MB</strong></div>
+          </aside>
+          <div class="form-footer">
+            <p class="form-message" id="upload-message" role="alert"></p>
+            <button class="primary-button" id="upload-button" type="submit" disabled>
+              <span>Generate 3D model</span><span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="view processing-view" data-view="processing" aria-labelledby="processing-title" aria-live="polite">
+        <div class="processing-copy">
+          <p class="eyebrow" id="processing-kicker">02 / Generate</p>
+          <h2 id="processing-title" tabindex="-1">Building the shape.</h2>
+          <p id="processing-message">Removing the background and preparing the image for 3D generation…</p>
+          <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
+          <div class="progress-readout"><strong id="progress-percent">0%</strong><span id="progress-stage">QUEUED</span></div>
+        </div>
+        <div class="assembly-loader" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </section>
+
+      <section class="view preview-view" data-view="voxel" aria-labelledby="voxel-title">
+        <div class="preview-header">
+          <div>
+            <p class="eyebrow">03 / Voxel model</p>
+            <h2 id="voxel-title" tabindex="-1">Shape, resolved.</h2>
+          </div>
+          <div class="preview-meta">
+            <p><span>GRID</span><strong id="model-dimensions">— × — × —</strong></p>
+            <p><span>VOXELS</span><strong id="voxel-count">—</strong></p>
+          </div>
+        </div>
+        <div class="comparison-shell" aria-label="Synchronized generated 3D and voxel model comparison">
+          <div class="comparison-toolbar">
+            <p><span aria-hidden="true">↔</span> Linked controls</p>
+            <button class="viewer-reset" data-reset-viewer="voxel" type="button">Reset both views</button>
+          </div>
+          <div class="comparison-grid">
+            <section class="comparison-panel" aria-labelledby="generated-model-label">
+              <h3 class="comparison-label" id="generated-model-label"><span>01</span> Generated 3D</h3>
+              <div class="viewer comparison-viewer" id="generated-viewer" role="img" aria-label="Interactive generated 3D model preview. Drag to orbit and scroll to zoom.">
+                <p class="viewer-loading">Loading generated model…</p>
+              </div>
+            </section>
+            <section class="comparison-panel" aria-labelledby="voxel-model-label">
+              <h3 class="comparison-label" id="voxel-model-label"><span>02</span> Voxel model</h3>
+              <div class="viewer comparison-viewer" id="voxel-viewer" role="img" aria-label="Interactive upright voxel model preview. Drag to orbit and scroll to zoom."></div>
+              <span class="viewer-tag" id="demo-tag" hidden>DEMO MODEL</span>
+            </section>
+          </div>
+        </div>
+        <div class="demo-notice" id="demo-notice" hidden><strong>Demo geometry</strong><span>Disable <code>SF3D_DEMO_MODE</code> to generate with Stable Fast 3D through the public Hugging Face Space.</span></div>
+        <div class="action-row">
+          <button class="text-button" type="button" data-action="restart">← Different image</button>
+          <button class="primary-button" id="legolize-button" type="button"><span>Convert to bricks</span><span aria-hidden="true">→</span></button>
+        </div>
+      </section>
+
+      <section class="view preview-view lego-view" data-view="lego" aria-labelledby="lego-title">
+        <div class="preview-header">
+          <div>
+            <p class="eyebrow">04 / Brick set</p>
+            <h2 id="lego-title" tabindex="-1">Ready to assemble.</h2>
+          </div>
+          <div class="piece-count"><strong id="piece-count">0</strong><span>total pieces</span></div>
+        </div>
+        <div class="lego-layout">
+          <div class="viewer-shell">
+            <div class="viewer" id="lego-viewer" aria-label="Interactive brick model preview"></div>
+            <button class="viewer-reset" data-reset-viewer="lego" type="button">Reset view</button>
+            <p class="viewer-help">Drag to orbit · Scroll to zoom</p>
+          </div>
+          <aside class="parts-panel">
+            <p class="mono-label">PARTS MANIFEST</p>
+            <div id="bill-of-materials"></div>
+          </aside>
+        </div>
+        <div class="action-row">
+          <button class="text-button" type="button" data-action="back-to-voxel">← View voxels</button>
+          <button class="primary-button" id="manual-button" type="button"><span>Generate instructions</span><span aria-hidden="true">↘</span></button>
+        </div>
+      </section>
+
+      <section class="view manual-view" data-view="manual" aria-labelledby="manual-title">
+        <div class="manual-sheet" aria-hidden="true">
+          <span class="sheet-number">01</span>
+          <div class="sheet-build"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <p>START AT THE BASE<br />LOCK EACH LAYER</p>
+        </div>
+        <div class="manual-copy">
+          <p class="eyebrow">05 / Manual</p>
+          <h2 id="manual-title" tabindex="-1">Your build book is ready.</h2>
+          <p>Layer-by-layer steps, a complete parts list, and practical build notes—packaged into one printable PDF.</p>
+          <a class="primary-button download-button" id="download-button" href="#" download>
+            <span>Download instructions</span><span aria-hidden="true">↓</span>
+          </a>
+          <button class="text-button" type="button" data-action="restart">Start another build →</button>
+        </div>
+      </section>
+
+      <section class="view error-view" data-view="error" aria-labelledby="error-title">
+        <p class="eyebrow">Workshop interrupted</p>
+        <h2 id="error-title" tabindex="-1">A brick slipped loose.</h2>
+        <p id="error-message">We couldn’t finish this build.</p>
+        <div class="action-row centered">
+          <button class="text-button" id="retry-button" type="button">Try again</button>
+          <button class="primary-button" type="button" data-action="restart"><span>New build</span><span aria-hidden="true">→</span></button>
+        </div>
+      </section>
+    </main>
+
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    </script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

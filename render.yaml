@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: bricked-up
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: HF_TOKEN
+        sync: false
+      - key: HF_SPACE_ID
+        value: Upsampler/stable-fast-3d
+      - key: HF_SPACE_API_NAME
+        value: /image_to_glb
+      - key: GEMINI_API_KEY
+        sync: false
