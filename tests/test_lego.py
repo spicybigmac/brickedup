@@ -34,3 +34,17 @@ def test_dimensions_handles_voxels_and_bricks():
         "depth": 5,
         "height": 5,
     }
+
+
+def test_greedy_pack_uses_six_stud_bricks_without_losing_detail():
+    voxels = [
+        {"x": x, "y": y, "z": 0, "color": "#F5C542"}
+        for y in range(2)
+        for x in range(12)
+    ]
+
+    bricks, bom = greedy_pack(voxels)
+
+    assert len(bricks) == 2
+    assert bom == {"2x6": 2}
+    assert {brick["part_id"] for brick in bricks} == {"2456"}

@@ -124,9 +124,14 @@ def _run_manual(job_id: str) -> None:
 
 @app.get("/api/health")
 def health() -> dict:
+    provider = os.getenv("SF3D_PROVIDER", "huggingface").strip().lower()
     return {
         "ok": True,
-        "reconstruction": "demo" if os.getenv("SF3D_DEMO_MODE", "").lower() in {"1", "true", "yes"} else "stable-fast-3d",
+        "reconstruction": (
+            "demo"
+            if os.getenv("SF3D_DEMO_MODE", "").lower() in {"1", "true", "yes"}
+            else f"stable-fast-3d-{provider}"
+        ),
         "manual_copy": "gemini" if os.getenv("GEMINI_API_KEY") else "local",
     }
 

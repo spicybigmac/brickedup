@@ -16,6 +16,14 @@ services:
         value: Upsampler/stable-fast-3d
       - key: HF_SPACE_API_NAME
         value: /image_to_glb
+      - key: SF3D_PROVIDER
+        sync: false
+      - key: SF3D_NGROK_URL
+        sync: false
+      - key: SF3D_NGROK_TIMEOUT_SECONDS
+        value: 300
+      - key: SF3D_NGROK_REMESH
+        value: triangle
       - key: VOXEL_TARGET_STUDS
         value: 32
       - key: VOXEL_MAX_CELLS

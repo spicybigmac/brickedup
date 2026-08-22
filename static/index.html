@@ -36,16 +36,19 @@
         <div class="hero-copy">
           <h1 id="landing-title" class="reveal" tabindex="-1">Snap it.<br /><span>Build it.</span></h1>
           <p class="hero-lede reveal delay-1">Turn one clear object image into a voxel model, a brick-ready set, and a printable instruction manual.</p>
-          <button class="primary-button reveal delay-2" id="start-button" type="button">
-            <span>Let’s go!</span><span aria-hidden="true">↗</span>
-          </button>
+          <div class="hero-cta reveal delay-2">
+            <button class="primary-button" id="start-button" type="button">
+              <span>Let’s go!</span><span aria-hidden="true">↗</span>
+            </button>
+            <p>get it cuz lego???</p>
+          </div>
         </div>
         <div class="hero-object" aria-hidden="true">
           <div class="object-caption"><span>OBJECT STUDY</span><b>01</b></div>
-          <div class="brick-sculpture">
-            <span class="brick b1"></span><span class="brick b2"></span><span class="brick b3"></span>
-            <span class="brick b4"></span><span class="brick b5"></span><span class="brick b6"></span>
-            <span class="brick b7"></span><span class="brick b8"></span><span class="brick b9"></span>
+          <div class="assembly assembly--hero">
+            <div class="assembly-piece assembly-piece--red"><span class="piece-face piece-top"></span><span class="piece-face piece-front"></span><span class="piece-face piece-side"></span><span class="piece-studs"><i></i><i></i><i></i></span></div>
+            <div class="assembly-piece assembly-piece--yellow"><span class="piece-face piece-top"></span><span class="piece-face piece-front"></span><span class="piece-face piece-side"></span><span class="piece-studs"><i></i><i></i><i></i></span></div>
+            <div class="assembly-piece assembly-piece--blue"><span class="piece-face piece-top"></span><span class="piece-face piece-front"></span><span class="piece-face piece-side"></span><span class="piece-studs"><i></i><i></i><i></i></span></div>
           </div>
         </div>
         <div class="landing-index" aria-hidden="true">01—05</div>
@@ -91,8 +94,10 @@
           <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
           <div class="progress-readout"><strong id="progress-percent">0%</strong><span id="progress-stage">QUEUED</span></div>
         </div>
-        <div class="assembly-loader" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span><span></span>
+        <div class="assembly assembly--loader" aria-hidden="true">
+          <div class="assembly-piece assembly-piece--red"><span class="piece-face piece-top"></span><span class="piece-face piece-front"></span><span class="piece-face piece-side"></span><span class="piece-studs"><i></i><i></i><i></i></span></div>
+          <div class="assembly-piece assembly-piece--yellow"><span class="piece-face piece-top"></span><span class="piece-face piece-front"></span><span class="piece-face piece-side"></span><span class="piece-studs"><i></i><i></i><i></i></span></div>
+          <div class="assembly-piece assembly-piece--blue"><span class="piece-face piece-top"></span><span class="piece-face piece-front"></span><span class="piece-face piece-side"></span><span class="piece-studs"><i></i><i></i><i></i></span></div>
         </div>
       </section>
 
@@ -139,7 +144,6 @@
             <p class="eyebrow">04 / Brick set</p>
             <h2 id="lego-title" tabindex="-1">Ready to assemble.</h2>
           </div>
-          <div class="piece-count"><strong id="piece-count">0</strong><span>total pieces</span></div>
         </div>
         <div class="lego-layout">
           <div class="viewer-shell">

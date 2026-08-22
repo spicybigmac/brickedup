@@ -19,6 +19,22 @@ Open <http://localhost:8000>. The application itself has no account system or da
 
 By default, the backend calls the public `Upsampler/stable-fast-3d` Hugging Face Space and then tries the official Space if the primary provider fails. Public ZeroGPU Spaces have per-account/IP usage limits, and the official Space's stateful web workflow is not always callable through its public API. If all providers fail, the job shows the remote inference error. `HF_TOKEN` is optional for public Spaces. Add `GEMINI_API_KEY` to let Gemini name the generated build. The diagram layout and geometrically accurate layer steps are generated locally.
 
+The reconstruction backend is selected with `SF3D_PROVIDER`:
+
+- `SF3D_PROVIDER=huggingface` uses the existing Hugging Face Space failover.
+- `SF3D_PROVIDER=ngrok` sends the image from FastAPI directly to a Kaggle-hosted Stable Fast 3D `/generate` endpoint through `SF3D_NGROK_URL`.
+
+Example ngrok configuration:
+
+```env
+SF3D_PROVIDER=ngrok
+SF3D_NGROK_URL=https://xxxx.ngrok-free.app
+SF3D_NGROK_TIMEOUT_SECONDS=300
+SF3D_NGROK_REMESH=triangle
+```
+
+The Kaggle endpoint must accept multipart field `file`, form fields `texture_resolution` and `remesh_option`, and return the raw binary GLB in the response body. The backend rejects JSON and ngrok HTML warning/error pages instead of passing them into the voxelizer. The ngrok URL usually changes when the Kaggle notebook or tunnel restarts, so update the environment value whenever a new URL is printed.
+
 For offline development, set `SF3D_DEMO_MODE=1`. The UI labels the resulting procedural geometry as a demo.
 
 ## Input requirements
@@ -53,6 +69,10 @@ Upload one PNG, JPG/JPEG, or WebP image no larger than 10 MB.
 
 ## Stable Fast 3D settings
 
+- `SF3D_PROVIDER` is `huggingface` or `ngrok` and defaults to `huggingface` locally.
+- `SF3D_NGROK_URL` is the public ngrok base URL printed by the Kaggle notebook; `/generate` is appended automatically.
+- `SF3D_NGROK_TIMEOUT_SECONDS` defaults to `300`.
+- `SF3D_NGROK_REMESH` defaults to `triangle` and is sent only to the Kaggle/ngrok endpoint.
 - `HF_SPACE_ID` selects the primary Space and defaults to `Upsampler/stable-fast-3d`.
 - `HF_SPACE_API_NAME` selects its Gradio endpoint and defaults to `/image_to_glb` for the primary Space.
 - `HF_TOKEN` is an optional server-side Hugging Face token. It is never exposed to the browser.
@@ -61,7 +81,7 @@ Upload one PNG, JPG/JPEG, or WebP image no larger than 10 MB.
 - `SF3D_VERTEX_COUNT` defaults to `-1`, which preserves the generated topology.
 - `SF3D_TEXTURE_SIZE` defaults to `1024`.
 - `VOXEL_TARGET_STUDS` defaults to `32`; dense meshes automatically step down only as far as needed to respect the cell cap.
-- `VOXEL_MAX_CELLS` defaults to `35000`. The converter lowers the whole resolution instead of deleting every nth cell, so capped models remain contiguous.
+- `VOXEL_MAX_CELLS` defaults to `35000`. The converter chooses a bounded resolution before voxelizing instead of repeatedly rebuilding oversized grids, so capped models remain contiguous without unnecessary CPU and memory spikes. Exact barycentric texture sampling runs on visible surface cells, then their colors are propagated to enclosed cells.
 - `SF3D_DEMO_MODE=1` disables the Space call and generates local demo geometry.
 
 ## MVP trade-offs
@@ -75,6 +95,8 @@ For production, persist jobs in a database and object storage, move generation i
 Create a **Blueprint** or **Web Service**, not a Static Site, from this repository. `render.yaml` installs the Python dependencies, starts Uvicorn on Render's assigned `$PORT`, and checks `/api/health`. Add `HF_TOKEN` and `GEMINI_API_KEY` as secret environment variables, then deploy and open the web service's single `onrender.com` URL. FastAPI serves both `static/` and `/api`, so the browser's relative API requests stay on the same origin and need no CORS configuration.
 
 If a Static Site was created already, it can display the HTML but has no Python process behind `/api`. Create a new Web Service/Blueprint and use its URL instead. Confirm `https://YOUR-SERVICE.onrender.com/api/health` returns JSON before testing an upload. Free services spin down when idle and use an ephemeral filesystem, so generated jobs and downloads disappear on restart; upgrade the web service or add managed persistence before a live judging session if reliability matters.
+
+For Kaggle/ngrok mode, set `SF3D_PROVIDER=ngrok` and `SF3D_NGROK_URL=https://xxxx.ngrok-free.app` in the Render Web Service's **Environment** page, then save the changes so Render restarts with the new configuration. Render calls ngrok server-to-server over HTTPS, so no CORS middleware is required. Keep the Kaggle cell and ngrok tunnel running for the entire build. `/api/health` reports the active provider without exposing the URL.
 
 ## Tests
 

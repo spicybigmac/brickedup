@@ -92,6 +92,41 @@ def test_voxel_cap_reduces_resolution_without_punching_holes(tmp_path: Path):
     assert len(voxels) == int(np.prod(dimensions))
 
 
+def test_voxel_cap_is_applied_before_expensive_voxelization(monkeypatch, tmp_path: Path):
+    model = tmp_path / "bounded-box.glb"
+    trimesh.creation.box(extents=(2, 2, 2)).export(model)
+    calls = []
+    original = trimesh.Trimesh.voxelized
+
+    def tracked_voxelized(mesh, *args, **kwargs):
+        calls.append(args[0] if args else kwargs.get("pitch"))
+        return original(mesh, *args, **kwargs)
+
+    monkeypatch.setattr(trimesh.Trimesh, "voxelized", tracked_voxelized)
+
+    voxels = stable_fast_3d.voxelize(model, target_studs=32, max_voxels=35_000)
+
+    assert len(calls) == 1
+    assert len(voxels) <= 35_000
+
+
+def test_voxelize_only_runs_mesh_color_lookup_for_surface_cells(monkeypatch, tmp_path: Path):
+    model = tmp_path / "colored-box.glb"
+    trimesh.creation.box(extents=(2, 2, 2)).export(model)
+    sampled = []
+    original = stable_fast_3d._surface_colors
+
+    def tracked_surface_colors(mesh, points, source_image_path):
+        sampled.append(len(points))
+        return original(mesh, points, source_image_path)
+
+    monkeypatch.setattr(stable_fast_3d, "_surface_colors", tracked_surface_colors)
+
+    voxels = stable_fast_3d.voxelize(model, target_studs=12)
+
+    assert sampled[0] < len(voxels)
+
+
 def test_generation_fails_over_to_healthy_space(monkeypatch, tmp_path: Path):
     image = tmp_path / "object.png"
     image.write_bytes(b"image")
@@ -165,3 +200,81 @@ def test_generation_exposes_quota_numbers_but_strips_html(monkeypatch, tmp_path:
         stable_fast_3d._generate_glb(image, None)
     assert "30s requested vs. 12s left" in str(error.value)
     assert "<a" not in str(error.value)
+
+
+def test_ngrok_generation_posts_expected_form_and_saves_glb(monkeypatch, tmp_path: Path):
+    image = tmp_path / "object.png"
+    image.write_bytes(b"png-data")
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        content = b"glTF-binary-model"
+        headers = {"content-type": "model/gltf-binary"}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["data"] = kwargs["data"]
+        captured["timeout"] = kwargs["timeout"]
+        captured["header"] = kwargs["headers"]["ngrok-skip-browser-warning"]
+        captured["file"] = kwargs["files"]["file"][1].read()
+        return FakeResponse()
+
+    monkeypatch.setenv("SF3D_NGROK_URL", "https://example.ngrok-free.app/")
+    monkeypatch.setenv("SF3D_NGROK_TIMEOUT_SECONDS", "275")
+    monkeypatch.setenv("SF3D_TEXTURE_SIZE", "2048")
+    monkeypatch.setenv("SF3D_NGROK_REMESH", "Triangle")
+    monkeypatch.setattr(stable_fast_3d.httpx, "post", fake_post)
+
+    result = stable_fast_3d._generate_ngrok_glb(image, tmp_path)
+
+    assert result.read_bytes() == b"glTF-binary-model"
+    assert captured == {
+        "url": "https://example.ngrok-free.app/generate",
+        "data": {"texture_resolution": "2048", "remesh_option": "triangle"},
+        "timeout": 275.0,
+        "header": "true",
+        "file": b"png-data",
+    }
+
+
+def test_ngrok_generation_rejects_non_glb_response(monkeypatch, tmp_path: Path):
+    image = tmp_path / "object.png"
+    image.write_bytes(b"png-data")
+
+    class FakeResponse:
+        status_code = 200
+        content = b"<html>ngrok error</html>"
+        headers = {"content-type": "text/html"}
+
+    monkeypatch.setenv("SF3D_NGROK_URL", "https://example.ngrok-free.app")
+    monkeypatch.setattr(stable_fast_3d.httpx, "post", lambda *_args, **_kwargs: FakeResponse())
+
+    with pytest.raises(RuntimeError, match="did not return a binary GLB"):
+        stable_fast_3d._generate_ngrok_glb(image, tmp_path)
+
+
+def test_reconstruct_can_select_ngrok_provider(monkeypatch, tmp_path: Path):
+    image = tmp_path / "object.png"
+    image.write_bytes(b"image")
+    downloaded = tmp_path / "download.glb"
+    downloaded.write_bytes(b"glTF-model")
+    calls = []
+    monkeypatch.setenv("SF3D_PROVIDER", "ngrok")
+    monkeypatch.setattr(
+        stable_fast_3d,
+        "_generate_ngrok_glb",
+        lambda image_path, work_dir: calls.append((image_path, work_dir)) or downloaded,
+    )
+    monkeypatch.setattr(
+        stable_fast_3d,
+        "voxelize",
+        lambda path, **kwargs: calls.append((path, kwargs)) or [{"x": 0, "y": 0, "z": 0, "color": "#123456"}],
+    )
+
+    voxels, mode, model_path = stable_fast_3d.reconstruct(image, tmp_path, lambda *_args: None)
+
+    assert voxels[0]["color"] == "#123456"
+    assert mode == "stable-fast-3d-ngrok"
+    assert model_path.read_bytes() == b"glTF-model"
+    assert calls[0] == (image, tmp_path)

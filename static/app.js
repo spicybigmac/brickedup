@@ -5,6 +5,12 @@ import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ACTIVE_STAGES = new Set(["queued", "reconstructing", "legolizing", "manual_generating"]);
 const STORAGE_KEY = "bricked-up-job";
+const STUD_PITCH = 1;
+// Match one rendered brick layer to one source voxel on every axis. The studs
+// are decorative and sit above this envelope without changing layer spacing.
+const BRICK_HEIGHT = STUD_PITCH;
+const STUD_HEIGHT = .16;
+const BRICK_SEAM = .03;
 const views = Object.fromEntries([...document.querySelectorAll("[data-view]")].map((el) => [el.dataset.view, el]));
 const railSteps = [...document.querySelectorAll("#progress-rail li")];
 
@@ -274,7 +280,6 @@ function populateVoxel(job) {
 
 function populateLego(job) {
   const bricks = job.lego_bricks || job.bricks || [];
-  document.querySelector("#piece-count").textContent = Number(job.piece_count ?? bricks.length).toLocaleString();
   const bom = job.bill_of_materials || makeBom(bricks);
   const target = document.querySelector("#bill-of-materials");
   target.innerHTML = "";
@@ -363,9 +368,10 @@ function centerAndNormalize(group) {
   const box = new THREE.Box3().setFromObject(group);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
-  group.position.sub(center);
   const maxSize = Math.max(size.x, size.y, size.z, 1);
-  group.scale.setScalar(18 / maxSize);
+  const scale = 18 / maxSize;
+  group.scale.setScalar(scale);
+  group.position.copy(center).multiplyScalar(-scale);
   return 18;
 }
 
@@ -580,16 +586,31 @@ function createVoxelMaterial() {
 
 function addBricks(group, bricks) {
   const groups = new Map();
-  bricks.forEach((brick) => {
-    const w = Number(brick.w || brick.width || 1);
-    const d = Number(brick.d || brick.depth || 1);
-    const h = Number(brick.h || brick.height || 1);
+  const integer = (value, fallback, minimum = -Infinity) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(minimum, Math.round(number)) : fallback;
+  };
+  bricks.forEach((source) => {
+    const brick = {
+      ...source,
+      x: integer(source.x, 0),
+      y: integer(source.y, 0),
+      z: integer(source.z, 0),
+      w: integer(source.w ?? source.width, 1, 1),
+      d: integer(source.d ?? source.depth, 1, 1),
+      h: integer(source.h ?? source.height, 1, 1),
+    };
+    const { w, d, h } = brick;
     const key = `${w},${d},${h}`;
     if (!groups.has(key)) groups.set(key, { w, d, h, bricks: [] });
     groups.get(key).bricks.push(brick);
   });
   for (const { w, d, h, bricks: same } of groups.values()) {
-    const geometry = new THREE.BoxGeometry(w * .97, h * .72, d * .97);
+    const geometry = new THREE.BoxGeometry(
+      w * STUD_PITCH - BRICK_SEAM,
+      h * BRICK_HEIGHT,
+      d * STUD_PITCH - BRICK_SEAM,
+    );
     const material = new THREE.MeshStandardMaterial({ roughness: .48, metalness: .02 });
     const mesh = new THREE.InstancedMesh(geometry, material, same.length);
     mesh.castShadow = true;
@@ -597,10 +618,11 @@ function addBricks(group, bricks) {
     const matrix = new THREE.Matrix4();
     const color = new THREE.Color();
     same.forEach((brick, index) => {
-      const x = Number(brick.x) || 0;
-      const y = Number(brick.y) || 0;
-      const z = Number(brick.z) || 0;
-      matrix.makeTranslation(x + (w - 1) / 2, z * .72, y + (d - 1) / 2);
+      matrix.makeTranslation(
+        (brick.x + (w - 1) / 2) * STUD_PITCH,
+        (brick.z + h / 2) * BRICK_HEIGHT,
+        (brick.y + (d - 1) / 2) * STUD_PITCH,
+      );
       mesh.setMatrixAt(index, matrix);
       color.set(cssColor(brick.color || brick.hex || "#c84832"));
       mesh.setColorAt(index, color);
@@ -608,15 +630,16 @@ function addBricks(group, bricks) {
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     group.add(mesh);
 
-    const studGeometry = new THREE.CylinderGeometry(.29, .29, .16, 16);
+    const studGeometry = new THREE.CylinderGeometry(.29 * STUD_PITCH, .29 * STUD_PITCH, STUD_HEIGHT, 16);
     const studs = new THREE.InstancedMesh(studGeometry, material, same.length * w * d);
     let studIndex = 0;
     same.forEach((brick) => {
-      const bx = Number(brick.x) || 0;
-      const by = Number(brick.y) || 0;
-      const bz = Number(brick.z) || 0;
       for (let ix = 0; ix < w; ix++) for (let iy = 0; iy < d; iy++) {
-        matrix.makeTranslation(bx + ix, bz * .72 + h * .36 + .08, by + iy);
+        matrix.makeTranslation(
+          (brick.x + ix) * STUD_PITCH,
+          (brick.z + h) * BRICK_HEIGHT + STUD_HEIGHT / 2,
+          (brick.y + iy) * STUD_PITCH,
+        );
         studs.setMatrixAt(studIndex, matrix);
         color.set(cssColor(brick.color || brick.hex || "#c84832"));
         studs.setColorAt(studIndex++, color);

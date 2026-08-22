@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
+import httpx
 import trimesh
 from gradio_client import Client, handle_file
 from PIL import Image
@@ -21,6 +22,8 @@ DEFAULT_SPACE = "Upsampler/stable-fast-3d"
 FALLBACK_SPACE = "stabilityai/stable-fast-3d"
 DEFAULT_TARGET_STUDS = 32
 DEFAULT_MAX_VOXELS = 35_000
+PROVIDER_HUGGINGFACE = "huggingface"
+PROVIDER_NGROK = "ngrok"
 
 
 def _demo_voxels(seed: str) -> list[dict[str, Any]]:
@@ -125,6 +128,41 @@ def _quantize_colors(rgb: np.ndarray, color_count: int = 32) -> list[str]:
     return [f"#{red:02X}{green:02X}{blue:02X}" for red, green, blue in values]
 
 
+def _bounded_resolution(extents: np.ndarray, target_studs: int, max_voxels: int) -> int:
+    """Choose a resolution whose complete bounding grid fits the voxel budget."""
+    target = max(1, int(target_studs))
+    budget = max(1, int(max_voxels))
+    normalized = np.asarray(extents, dtype=float) / max(float(np.max(extents)), 1e-9)
+    for resolution in range(target, 0, -1):
+        # Voxel centers include both ends of a mesh extent. This is deliberately
+        # an upper bound: occupied cells can never exceed the enclosing grid.
+        grid_shape = np.ceil(normalized * resolution).astype(np.int64) + 1
+        if int(np.prod(grid_shape)) <= budget:
+            return resolution
+    return 1
+
+
+def _voxel_colors(
+    mesh: trimesh.Trimesh,
+    surface_points: np.ndarray,
+    filled_points: np.ndarray,
+    source_image_path: Path | None,
+) -> list[str]:
+    """Color surface cells precisely, then cheaply propagate into the interior."""
+    if not len(surface_points):
+        surface_points = filled_points
+    surface_rgb = _surface_colors(mesh, surface_points, source_image_path)
+    if len(surface_points) == len(filled_points) and np.array_equal(surface_points, filled_points):
+        rgb = surface_rgb
+    else:
+        # Interior cells have no visible mesh surface to sample. Give each one
+        # the color of its nearest surface cell instead of running thousands of
+        # additional nearest-triangle queries against the high-poly source mesh.
+        nearest = cKDTree(surface_points).query(filled_points, workers=1)[1]
+        rgb = surface_rgb[nearest]
+    return _quantize_colors(rgb)
+
+
 def voxelize(
     path: Path,
     target_studs: int = DEFAULT_TARGET_STUDS,
@@ -139,20 +177,30 @@ def voxelize(
     longest = max(float(value) for value in mesh.extents)
     if longest <= 0:
         raise RuntimeError("The generated mesh has invalid dimensions")
-    resolution = max(1, int(target_studs))
+    resolution = _bounded_resolution(mesh.extents, target_studs, max_voxels)
     mesh.apply_scale(resolution / longest)
-    while True:
-        matrix = mesh.voxelized(pitch=1.0).fill()
-        points = np.rint(matrix.points).astype(int)
-        if len(points) <= max_voxels or resolution <= 1:
-            break
-        next_resolution = max(1, resolution - 1)
+    surface_matrix = mesh.voxelized(pitch=1.0)
+    surface_points = np.rint(surface_matrix.points).astype(int)
+    points = np.rint(surface_matrix.fill().points).astype(int)
+    if len(points) > max_voxels and resolution > 1:
+        # The bounding-grid estimate is conservative, but keep one proportional
+        # retry for unusual voxelizer rounding instead of decrementing and fully
+        # rebuilding the grid many times.
+        next_resolution = max(
+            1,
+            min(
+                resolution - 1,
+                int(resolution * (max_voxels / len(points)) ** (1 / 3) * 0.98),
+            ),
+        )
         mesh.apply_scale(next_resolution / resolution)
-        resolution = next_resolution
+        surface_matrix = mesh.voxelized(pitch=1.0)
+        surface_points = np.rint(surface_matrix.points).astype(int)
+        points = np.rint(surface_matrix.fill().points).astype(int)
     if not len(points):
         raise RuntimeError("The generated mesh could not be voxelized")
+    colors_by_point = _voxel_colors(mesh, surface_points, points, source_image_path)
     points -= points.min(axis=0)
-    colors_by_point = _quantize_colors(_surface_colors(mesh, points, source_image_path))
     return [
         {
             # Stable Fast 3D GLBs are Y-up. The app's build grid is Z-up, so
@@ -243,6 +291,62 @@ def _generate_glb(image_path: Path, token: str | None) -> tuple[Path, str]:
     raise RuntimeError(f"Stable Fast 3D remote inference failed. Providers attempted: {attempted}.")
 
 
+def _generate_ngrok_glb(image_path: Path, work_dir: Path) -> Path:
+    """Call the user's Kaggle-hosted Stable Fast 3D service through ngrok."""
+    base_url = os.getenv("SF3D_NGROK_URL", "").strip().rstrip("/")
+    if not base_url:
+        raise RuntimeError("SF3D_PROVIDER is ngrok, but SF3D_NGROK_URL is not configured")
+    try:
+        parsed = httpx.URL(base_url)
+    except Exception as exc:
+        raise RuntimeError("SF3D_NGROK_URL is not a valid URL") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.host:
+        raise RuntimeError("SF3D_NGROK_URL must be an http:// or https:// URL")
+
+    endpoint = base_url if parsed.path.rstrip("/").endswith("/generate") else f"{base_url}/generate"
+    timeout = float(os.getenv("SF3D_NGROK_TIMEOUT_SECONDS", "300"))
+    texture_resolution = int(os.getenv("SF3D_TEXTURE_SIZE", "1024"))
+    remesh_option = os.getenv("SF3D_NGROK_REMESH", "triangle").strip().lower()
+
+    try:
+        with image_path.open("rb") as source:
+            response = httpx.post(
+                endpoint,
+                files={"file": (image_path.name, source, "application/octet-stream")},
+                data={
+                    "texture_resolution": str(texture_resolution),
+                    "remesh_option": remesh_option,
+                },
+                headers={"ngrok-skip-browser-warning": "true"},
+                timeout=timeout,
+                follow_redirects=True,
+            )
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"Kaggle/ngrok Stable Fast 3D timed out after {timeout:g} seconds") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Could not reach the Kaggle/ngrok Stable Fast 3D API: {type(exc).__name__}") from exc
+
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            payload = response.json()
+            detail = str(payload.get("detail") or payload.get("error") or "") if isinstance(payload, dict) else ""
+        except ValueError:
+            detail = response.text.strip()
+        suffix = f": {detail[:300]}" if detail else ""
+        raise RuntimeError(f"Kaggle/ngrok Stable Fast 3D returned HTTP {response.status_code}{suffix}")
+    if not response.content.startswith(b"glTF"):
+        content_type = response.headers.get("content-type", "unknown")
+        raise RuntimeError(
+            "Kaggle/ngrok Stable Fast 3D did not return a binary GLB "
+            f"(content type: {content_type})"
+        )
+
+    output = work_dir / "kaggle-stable-fast-3d.glb"
+    output.write_bytes(response.content)
+    return output
+
+
 def reconstruct(
     image_path: Path,
     work_dir: Path,
@@ -256,10 +360,19 @@ def reconstruct(
         _export_voxel_model(voxels, model_path)
         return voxels, "demo", model_path
 
-    token = os.getenv("HF_TOKEN") or None
-    update(14, "Connecting to Stable Fast 3D on Hugging Face")
-    update(28, "Removing the background and preparing a 512 × 512 input")
-    downloaded, _provider = _generate_glb(image_path, token)
+    provider = os.getenv("SF3D_PROVIDER", PROVIDER_HUGGINGFACE).strip().lower()
+    if provider in {PROVIDER_HUGGINGFACE, "hf", "hugging-face"}:
+        update(14, "Connecting to Stable Fast 3D on Hugging Face")
+        update(28, "Removing the background and preparing a 512 × 512 input")
+        downloaded, _provider = _generate_glb(image_path, os.getenv("HF_TOKEN") or None)
+        mode = "stable-fast-3d"
+    elif provider == PROVIDER_NGROK:
+        update(14, "Connecting to Stable Fast 3D on Kaggle through ngrok")
+        update(28, "Uploading the prepared image to Kaggle")
+        downloaded = _generate_ngrok_glb(image_path, work_dir)
+        mode = "stable-fast-3d-ngrok"
+    else:
+        raise RuntimeError("SF3D_PROVIDER must be 'huggingface' or 'ngrok'")
     update(76, "Voxelizing the generated mesh")
     model_path = work_dir / "stable-fast-3d.glb"
     shutil.copy2(downloaded, model_path)
@@ -270,6 +383,6 @@ def reconstruct(
             source_image_path=image_path,
             max_voxels=int(os.getenv("VOXEL_MAX_CELLS", str(DEFAULT_MAX_VOXELS))),
         ),
-        "stable-fast-3d",
+        mode,
         model_path,
     )
