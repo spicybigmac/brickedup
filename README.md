@@ -1,34 +1,93 @@
 # Bricked Up
 
-Turns an image into a generated 3D model, voxelizes it, greedily packs the voxels into brick-shaped pieces, and produces a downloadable build manual.
+Bricked Up turns one object image into a generated 3D mesh, a colored voxel model, a brick-ready build, and a downloadable diagram-first PDF manual.
 
-## Access through Render
+```text
+Image → Stable Fast 3D GLB → colored voxels → greedy brick packing → PDF manual
+```
 
-Open this link: [https://bricked-up-us05.onrender.com]([url](https://bricked-up-us05.onrender.com))
+This is a single-page FastAPI + Three.js application. The default local workflow uses a Kaggle-hosted Stable Fast 3D server.
 
-## Run locally
+> **Input:** one PNG, JPG/JPEG, or WebP image up to 10 MB.
 
-Requires Python 3.11+.
+## Quick start
+
+### 1. Install prerequisites
+
+- Python **3.12** is the tested version. Python 3.11+ should also work.
+- `pip` and a shell.
+- For real 3D generation, choose one provider in [Choose a 3D provider](#choose-a-3d-provider).
+**- During Judging Phase, use the following SF3D_NGROK_URL: https://during-kimono-even.ngrok-free.dev**
+
+### 2. Create and activate a virtual environment
+
+macOS/Linux:
 
 ```bash
 cd bricked-up
 python3 -m venv .venv
 source .venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+cd bricked-up
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Activation changes the `python` and `pip` commands in the current terminal so they use this project's isolated `.venv` folder. Open a new terminal later? Activate it again before running the app.
+
+### 3. Install dependencies and create local configuration
+
+macOS/Linux:
+
+```bash
 pip install -r requirements.txt
 cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Open `.env` in an editor and choose a provider below. Do not commit `.env`; it can contain private API tokens and your ngrok URL.
+
+### 4. Start the app
+
+```bash
 python main.py
 ```
 
-Open <http://localhost:8000>.
+Open [http://localhost:8000](http://localhost:8000).
 
-By default, the backend calls the public `Upsampler/stable-fast-3d` Hugging Face Space and then tries the official Space if the primary provider fails. Public ZeroGPU Spaces have per-account/IP usage limits, and the official Space's stateful web workflow is not always callable through its public API. If all providers fail, the job shows the remote inference error. `HF_TOKEN` is optional for public Spaces. Add `GEMINI_API_KEY` to let Gemini name the generated build. The diagram layout and geometrically accurate layer steps are generated locally.
+For automatic backend reloads while editing Python:
 
-The reconstruction backend is selected with `SF3D_PROVIDER`:
+```bash
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
 
-- `SF3D_PROVIDER=huggingface` uses the existing Hugging Face Space failover.
-- `SF3D_PROVIDER=ngrok` sends the image from FastAPI directly to a Kaggle-hosted Stable Fast 3D `/generate` endpoint through `SF3D_NGROK_URL`.
+Confirm the server is healthy:
 
-Example ngrok configuration:
+```bash
+curl http://localhost:8000/api/health
+```
+
+You should receive JSON with `"ok": true` and the active reconstruction provider.
+
+## Choose a 3D provider
+
+Set exactly one mode in `.env`.
+
+### Option A — Kaggle + ngrok (recommended for a live demo)
+
+Run Stable Fast 3D in your Kaggle notebook, start its ngrok tunnel, then copy the current public tunnel URL into `.env`:
+
+# NOTE: during the Judging period, I will be running a Kaggle server: Use the following SF3D_NGROK_URL: https://during-kimono-even.ngrok-free.dev
 
 ```env
 SF3D_PROVIDER=ngrok
@@ -37,75 +96,125 @@ SF3D_NGROK_TIMEOUT_SECONDS=300
 SF3D_NGROK_REMESH=triangle
 ```
 
-The Kaggle endpoint must accept multipart field `file`, form fields `texture_resolution` and `remesh_option`, and return the raw binary GLB in the response body. The backend rejects JSON and ngrok HTML warning/error pages instead of passing them into the voxelizer. The ngrok URL usually changes when the Kaggle notebook or tunnel restarts, so update the environment value whenever a new URL is printed.
+Bricked Up sends a multipart request to `https://xxxx.ngrok-free.app/generate` with:
 
-For offline development, set `SF3D_DEMO_MODE=1`. The UI labels the resulting procedural geometry as a demo.
+```text
+file                 uploaded image
+texture_resolution   1024 by default
+remesh_option        triangle by default
+```
 
-## Input requirements
+The Kaggle endpoint must return the raw binary GLB body—not JSON, HTML, or an ngrok warning page. Keep the Kaggle notebook and ngrok tunnel running while using the app. A tunnel URL usually changes after restarting the notebook, so update `SF3D_NGROK_URL` and restart FastAPI when it changes.
 
-Upload one PNG, JPG/JPEG, or WebP image no larger than 10 MB.
+### Option B — Hugging Face Space
 
-- Use one object, fully visible in the frame.
-- Prefer a plain or transparent background with clear separation around the object.
-- Use even lighting and avoid blur.
-- A square image works best. Stable Fast 3D removes the background and prepares a 512 × 512 model input.
+```env
+SF3D_PROVIDER=huggingface
+HF_SPACE_ID=Upsampler/stable-fast-3d
+HF_SPACE_API_NAME=/image_to_glb
+# Optional, but useful for rate limits:
+HF_TOKEN=
+```
 
-## What each part does
+The backend tries the configured Space and then a second Stable Fast 3D Space if the first one fails. Public ZeroGPU Spaces can be queued, temporarily unavailable, or quota-limited even with a valid Hugging Face token.
 
-- `main.py` serves the SPA, validates real image content with Pillow, exposes the API, and runs longer work in a thread pool.
-- `app/stable_fast_3d.py` calls a Stable Fast 3D Hugging Face Space, tries a second provider when necessary, and downloads the generated GLB. Stable Fast 3D meshes are converted from Y-up into the app's Z-up build grid and filled into a target 32-stud voxel model capped at 35,000 cells. Colors use the closest surface triangle and barycentrically interpolated UV coordinates to sample the GLB texture accurately; vertex colors and front-projected source-image colors remain fallbacks. The result is adaptively quantized to 32 colors.
-- `app/lego.py` scans each height/color layer and greedily places the largest common rectangular brick that fits. Odd layers reverse the preferred orientation to reduce aligned seams.
-- `app/manual.py` optionally asks Gemini for a short build title, then uses ReportLab to create a diagram-first manual: color part icons, exact top-down stud grids, ghosted already-built support, consistent front markers, height meters, and placement arrows with very little text. Dense layers are split into smaller steps so every required part remains visible in the callouts.
-- `app/store.py` holds job state in memory for this one-instance hackathon deployment.
-- `static/` contains the no-build SPA and Three.js previews, including synchronized generated-mesh and voxel cameras.
-- `render.yaml` contains the Render web-service definition.
+## Recommended local settings
+
+Use:
+
+```env
+VOXEL_TARGET_STUDS=28
+VOXEL_MAX_CELLS=25000
+WORKER_THREADS=2
+```
+
+This reduces dense models by roughly 25–35% while retaining the recognizable shape and texture. `VOXEL_TARGET_STUDS` is the quality control; `VOXEL_MAX_CELLS` is a hard safety limit.
+
+## Use the app
+
+1. Upload a clear image of one object.
+2. Wait while Stable Fast 3D produces the GLB and the backend creates a colored voxel model.
+3. Orbit the generated mesh and voxel model together on the comparison page.
+4. Select **Convert to bricks**. The packer creates the brick layout and parts manifest.
+5. Select **Generate instructions** and download the PDF.
+
+For the best source image, use one clearly isolated object, a plain/transparent background, even lighting, sharp focus, and minimal occlusion. A square image generally works best.
+
+## Local configuration reference
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SF3D_PROVIDER` | `huggingface` | `huggingface` or `ngrok` reconstruction route. |
+| `SF3D_NGROK_URL` | empty | Kaggle tunnel base URL. `/generate` is added automatically. |
+| `SF3D_NGROK_TIMEOUT_SECONDS` | `300` | Maximum time waiting for the Kaggle response. |
+| `SF3D_NGROK_REMESH` | `triangle` | Remesh option sent to the Kaggle endpoint. |
+| `HF_SPACE_ID` | `Upsampler/stable-fast-3d` | Primary Hugging Face Space. |
+| `HF_SPACE_API_NAME` | `/image_to_glb` | Gradio API endpoint for the primary Space. |
+| `HF_TOKEN` | empty | Optional Hugging Face token; never sent to the browser. |
+| `SF3D_FOREGROUND_RATIO` | `0.85` | Foreground setting for Hugging Face generation. |
+| `SF3D_REMESH` | `None` | Hugging Face remesh setting: `None`, `Triangle`, or `Quad`. |
+| `SF3D_VERTEX_COUNT` | `-1` | Hugging Face mesh topology setting. |
+| `SF3D_TEXTURE_SIZE` | `1024` | Requested texture size for the remote model. |
+| `VOXEL_TARGET_STUDS` | `32` | Desired longest dimension of the voxel grid. |
+| `VOXEL_MAX_CELLS` | `35000` | Maximum occupied voxel cells. |
+| `SF3D_DEMO_MODE` | `0` | Set to `1` for offline demo geometry. |
+| `GEMINI_API_KEY` | empty | Optional: generates a short build title. |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model for the title request. |
+| `PORT` | `8000` | Local server port. |
+| `MAX_UPLOAD_MB` | `10` | Maximum upload size. |
+| `WORKER_THREADS` | `2` | Number of background-job worker threads. |
+
+## How the pipeline works
+
+1. **3D reconstruction:** Stable Fast 3D returns a textured GLB from the input image.
+2. **Voxelization:** Trimesh normalizes the mesh onto a bounded integer grid, rasterizes its surface, fills enclosed volume, and samples its GLB texture with barycentric UV interpolation. Surface colors are propagated to interior cells, then reduced to a 32-color palette.
+3. **Brick packing:** Each exact color and height layer is processed independently. A greedy algorithm tries the largest legal rectangular brick footprint first, guaranteeing each voxel is covered exactly once.
+4. **Instructions:** ReportLab creates a vector PDF from the exact brick coordinates: inventory, stud grids, colored part callouts, ghosted support, placement arrows, front marker, and layer meter. Gemini is optional and supplies only a short title; it does not decide geometry or placements.
 
 ## API flow
 
-1. `POST /api/jobs` with multipart field `image`.
-2. Poll `GET /api/jobs/{id}` until `stage` is `model_ready`.
-3. Preview the source GLB from the returned `model_url` (`GET /api/jobs/{id}/model.glb`).
-4. `POST /api/jobs/{id}/legolize`, then poll until `lego_ready`.
-5. `POST /api/jobs/{id}/manual`, then poll until `complete`.
-6. Download `GET /api/jobs/{id}/manual.pdf`.
+```text
+POST /api/jobs
+  → poll GET /api/jobs/{id} until stage is model_ready
+  → POST /api/jobs/{id}/legolize
+  → poll until lego_ready
+  → POST /api/jobs/{id}/manual
+  → poll until complete
+  → GET /api/jobs/{id}/manual.pdf
+```
 
-`POST /api/jobs` returns `202 Accepted` after the image is validated and the background task is queued. It does not mean 3D generation has finished. Poll the returned job with `GET /api/jobs/{id}`; a completed provider failure appears there as `stage: "failed"` with a user-facing error. The GET request itself remains `200 OK` because the job resource was retrieved successfully, even when the work represented by that resource failed.
+`POST /api/jobs` returns `202 Accepted` after validation and queueing. It does not mean reconstruction has completed. A later job lookup may return HTTP `200 OK` with `stage: "failed"`; that means the job record was found successfully, but its background work failed. Read its `error` field.
 
-## Stable Fast 3D settings
+The job store is process-local. Restarting FastAPI clears active job records and causes old `/api/jobs/{id}` links to return `404`.
 
-- `SF3D_PROVIDER` is `huggingface` or `ngrok` and defaults to `huggingface` locally.
-- `SF3D_NGROK_URL` is the public ngrok base URL printed by the Kaggle notebook; `/generate` is appended automatically.
-- `SF3D_NGROK_TIMEOUT_SECONDS` defaults to `300`.
-- `SF3D_NGROK_REMESH` defaults to `triangle` and is sent only to the Kaggle/ngrok endpoint.
-- `HF_SPACE_ID` selects the primary Space and defaults to `Upsampler/stable-fast-3d`.
-- `HF_SPACE_API_NAME` selects its Gradio endpoint and defaults to `/image_to_glb` for the primary Space.
-- `HF_TOKEN` is an optional server-side Hugging Face token. It is never exposed to the browser.
-- `SF3D_FOREGROUND_RATIO` defaults to `0.85`.
-- `SF3D_REMESH` defaults to `None`; valid Space choices are `None`, `Triangle`, and `Quad`.
-- `SF3D_VERTEX_COUNT` defaults to `-1`, which preserves the generated topology.
-- `SF3D_TEXTURE_SIZE` defaults to `1024`.
-- `VOXEL_TARGET_STUDS` defaults to `32`; dense meshes automatically step down only as far as needed to respect the cell cap.
-- `VOXEL_MAX_CELLS` defaults to `35000`. The converter chooses a bounded resolution before voxelizing instead of repeatedly rebuilding oversized grids, so capped models remain contiguous without unnecessary CPU and memory spikes. Exact barycentric texture sampling runs on visible surface cells, then their colors are propagated to enclosed cells.
-- `SF3D_DEMO_MODE=1` disables the Space call and generates local demo geometry.
+## Troubleshooting
 
-## MVP trade-offs
-
-Stable Fast 3D infers unseen geometry from one image, so the result is fast and visually complete but not a measurement-accurate scan. The voxel grid intentionally discards fine surface and texture detail so it can be represented by rectangular bricks. The greedy packer is deterministic and easy to explain, but it is not a global minimum-part solver or a structural simulation.
-
-For production, persist jobs in a database and object storage, move generation into a durable queue, use a private duplicated Space for predictable capacity, and validate colors and availability against a parts inventory.
-
-## Render deployment
-
-Create a **Blueprint** or **Web Service**, not a Static Site, from this repository. `render.yaml` installs the Python dependencies, starts Uvicorn on Render's assigned `$PORT`, and checks `/api/health`. Add `HF_TOKEN` and `GEMINI_API_KEY` as secret environment variables, then deploy and open the web service's single `onrender.com` URL. FastAPI serves both `static/` and `/api`, so the browser's relative API requests stay on the same origin and need no CORS configuration.
-
-If a Static Site was created already, it can display the HTML but has no Python process behind `/api`. Create a new Web Service/Blueprint and use its URL instead. Confirm `https://YOUR-SERVICE.onrender.com/api/health` returns JSON before testing an upload. Free services spin down when idle and use an ephemeral filesystem, so generated jobs and downloads disappear on restart; upgrade the web service or add managed persistence before a live judging session if reliability matters.
-
-For Kaggle/ngrok mode, set `SF3D_PROVIDER=ngrok` and `SF3D_NGROK_URL=https://xxxx.ngrok-free.app` in the Render Web Service's **Environment** page, then save the changes so Render restarts with the new configuration. Render calls ngrok server-to-server over HTTPS, so no CORS middleware is required. Keep the Kaggle cell and ngrok tunnel running for the entire build. `/api/health` reports the active provider without exposing the URL.
+| Symptom | Cause and fix |
+| --- | --- |
+| `No module named scipy` | The virtual environment is inactive or dependencies were not installed. Run `source .venv/bin/activate` and `pip install -r requirements.txt`. |
+| Stable Fast 3D unavailable / ZeroGPU message | The public Space is queued, out of quota, or unavailable. Retry later, use Kaggle/ngrok, or enable demo mode. |
+| Kaggle/ngrok request fails | Confirm the notebook and tunnel are still running, the URL is current, and the endpoint returns binary GLB from `/generate`. Then restart FastAPI after changing `.env`. |
+| `/api/jobs/{id}` returns `404` | The server restarted or the ID belongs to a different process; create a new build. |
+| The browser still shows an old UI | Hard-refresh the page after frontend changes. |
+| Voxelization is slow | Use `VOXEL_TARGET_STUDS=28` and `VOXEL_MAX_CELLS=25000`; avoid starting multiple builds simultaneously. |
+| Colors are less accurate on hidden surfaces | Single-image reconstruction must infer unseen geometry. Exterior colors use the GLB texture; enclosed cells inherit nearby surface colors. |
 
 ## Tests
+
+With the virtual environment active:
 
 ```bash
 pytest -q
 ```
 
-LEGO is a trademark of the LEGO Group, which does not sponsor or endorse this project.
+## Project layout
+
+- `main.py` — FastAPI server, static-site hosting, API endpoints, validation, and background jobs.
+- `app/stable_fast_3d.py` — Stable Fast 3D providers, GLB validation, voxelization, and color transfer.
+- `app/lego.py` — Greedy voxel-to-brick packing and bill of materials.
+- `app/manual.py` — Deterministic vector PDF manual generator and optional Gemini title request.
+- `app/store.py` — In-memory job state.
+- `static/` — Single-page interface and Three.js viewers.
+- `.env.example` — safe configuration template.
+- `render.yaml` — Render Web Service deployment configuration.
+
