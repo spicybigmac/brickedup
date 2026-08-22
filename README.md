@@ -1,6 +1,10 @@
 # Bricked Up
 
-A hackathon-ready single-page app that turns one object image into a generated 3D model, voxelizes it, greedily packs the voxels into brick-shaped pieces, and produces a downloadable build manual.
+Turns an image into a generated 3D model, voxelizes it, greedily packs the voxels into brick-shaped pieces, and produces a downloadable build manual.
+
+## Access through Render
+
+Open this link: [https://bricked-up-us05.onrender.com]([url](https://bricked-up-us05.onrender.com))
 
 ## Run locally
 
@@ -15,7 +19,7 @@ cp .env.example .env
 python main.py
 ```
 
-Open <http://localhost:8000>. The application itself has no account system or database.
+Open <http://localhost:8000>.
 
 By default, the backend calls the public `Upsampler/stable-fast-3d` Hugging Face Space and then tries the official Space if the primary provider fails. Public ZeroGPU Spaces have per-account/IP usage limits, and the official Space's stateful web workflow is not always callable through its public API. If all providers fail, the job shows the remote inference error. `HF_TOKEN` is optional for public Spaces. Add `GEMINI_API_KEY` to let Gemini name the generated build. The diagram layout and geometrically accurate layer steps are generated locally.
 
